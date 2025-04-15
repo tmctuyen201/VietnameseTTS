@@ -33,7 +33,7 @@ class TokenEncoderWithFastText(nn.Module):
         # Với batch_first=True, đầu ra của LSTM sẽ có shape (B, T, 2 * lstm_dim)
         self.lstm = nn.LSTM(input_size=lstm_dim, hidden_size=lstm_dim, 
                             num_layers=1, batch_first=True, bidirectional=True)
-    
+        self.fc = nn.Linear(2 * lstm_dim, lstm_dim)
     def forward(self, fasttext_embeddings, lengths):
         """
         Args:
@@ -79,5 +79,5 @@ class TokenEncoderWithFastText(nn.Module):
         packed_output, _ = self.lstm(packed_x)
         # Giải đóng gói: output có shape (B, T, 2*lstm_dim)
         contextualized_features, _ = nn.utils.rnn.pad_packed_sequence(packed_output, batch_first=True)
-        
+        contextualized_features = self.fc(contextualized_features)
         return contextualized_features

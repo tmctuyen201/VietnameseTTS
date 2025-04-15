@@ -8,7 +8,7 @@ class Config:
     
     # Kích thước không gian của đặc trưng từ Encoder (các vector contextualized)
     # Đây cũng là kích thước được sử dụng cho mô hình acoustic encoder.
-    acoustic_encoder_dim = 256
+    acoustic_encoder_dim = 512
     
     # Kích thước của Mel-spectrogram (số kênh)
     mel_dim = 80

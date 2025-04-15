@@ -1,104 +1,120 @@
-from config.config import Config
-from dataset import TTS_Dataset
-from model import HybridTTS
-from datasets import load_dataset
+import logging
 import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
+from config.config import Config
+from dataset import TTS_Dataset
+from model import HybridTTS
+from datasets import load_dataset
 
+
+# Cấu hình logging để hiển thị thông tin ra terminal và vào file
+logging.basicConfig(
+    level=logging.INFO,  # Ghi lại tất cả các log ở mức INFO trở lên
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Hiển thị log trên terminal (real-time)
+        # Lưu log vào file training_log.txt (tuỳ chọn)
+        logging.FileHandler('training_log.txt', mode='w')
+    ]
+)
+
+# Khởi tạo mô hình và các thành phần
 config = Config()
-model = HybridTTS(config).cuda()  # Đây là mô hình PyTorch của bạn.
-# MSE Loss hoặc L1 Loss có thể được sử dụng
+model = HybridTTS(config).cuda()
 criterion = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=1e-4,
+                       betas=(0.9, 0.98), eps=1e-9)
 
-# Optimizer: Adam hoặc AdamW
-optimizer = optim.Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.98), eps=1e-9)
 
 def custom_collate_fn(batch, target_length=None):
-    """
-    batch: list các tuple (fasttext_embeddings, mel, length)
-      - fasttext_embeddings: tensor với shape (T, fasttext_dim)
-      - mel: numpy array hoặc tensor với shape (T_mel, mel_dim) 
-      - length: int, số token của fasttext_embeddings
-    """
     fasttext_list, mel_list, lengths = zip(*batch)
-    
-    # Nếu mel chưa là tensor, chuyển từ numpy sang tensor:
-    mel_list = [torch.tensor(m) if not torch.is_tensor(m) else m for m in mel_list]
-    
-    # Nếu cần, bạn có thể transpose mel nếu mô hình của bạn yêu cầu (B, T, mel_dim):
-    # Giả sử mel có shape (n_mels, T) từ librosa, bạn cần chuyển thành (T, n_mels)
-    mel_list = [m.transpose(0, 1) if m.dim() == 2 and m.size(0) == 80 else m for m in mel_list]
-    
-    # Pad fastText embeddings cho batch: (B, max_fasttext_length, fasttext_dim)
-    fasttext_padded = pad_sequence(fasttext_list, batch_first=True, padding_value=0)
-    
-    # Pad mel spectrograms cho batch: (B, max_T_mel, mel_dim)
+
+    mel_list = [torch.tensor(m) if not torch.is_tensor(m)
+                else m for m in mel_list]
+    mel_list = [m.transpose(0, 1) if m.dim() == 2 and m.size(
+        0) == 80 else m for m in mel_list]
+
+    fasttext_padded = pad_sequence(
+        fasttext_list, batch_first=True, padding_value=0)
     mel_padded = pad_sequence(mel_list, batch_first=True, padding_value=0)
-    
-    # Lấy độ dài thực tế của mỗi mẫu (số token)
+
     lengths = torch.tensor(lengths, dtype=torch.long)
-    
-    # Ensure that mel_padded và fasttext_padded có độ dài tương thích
+
     B, T = fasttext_padded.size(0), fasttext_padded.size(1)
     max_mel_length = mel_padded.size(1)
-    
+
     if target_length:
-        # Nếu yêu cầu, tiến hành padding/cắt Mel-spectrograms hoặc downsample
         if max_mel_length > target_length:
-            # Trimming: Cắt Mel-spectrograms theo target_length
             mel_padded = mel_padded[:, :target_length, :]
         elif max_mel_length < target_length:
-            # Up-sampling: Nhân Mel-spectrograms theo tỷ lệ lên target_length
-            mel_padded = F.interpolate(mel_padded, size=(target_length, mel_padded.size(2)), mode='linear', align_corners=False)    
-    # Kiểm tra lại chiều dài của mel_padded và fasttext_padded đã đồng bộ chưa
+            mel_padded = F.interpolate(mel_padded, size=(
+                target_length, mel_padded.size(2)), mode='linear', align_corners=False)
+
     return fasttext_padded, mel_padded, lengths
+
+
 def save_model(model, path="hybrid_tts_model.pth"):
-    """Lưu mô hình sau khi huấn luyện hoàn tất"""
     torch.save(model.state_dict(), path)
-    print(f"Model saved to {path}")
-def train_one_epoch(model, train_loader, criterion, optimizer):
+    logging.info(f"Model saved to {path}")
+
+
+def train_one_epoch(model, train_loader, criterion, optimizer, epoch):
     model.train()
     total_loss = 0.0
     for batch_idx, (fasttext_embeddings, mel, lengths) in enumerate(train_loader):
         optimizer.zero_grad()
 
-        # Đưa dữ liệu vào GPU nếu có
         fasttext_embeddings = fasttext_embeddings.cuda()
-        mel = mel.cuda()
-        lengths = lengths.cuda()
-        lengths = lengths.cpu()
-        # Tiến hành một bước forward
-        outputs = model(fasttext_embeddings, lengths, target_mel=mel)  # Tính toán Mel-spectrogram từ mô hình
+        mel = mel.cuda().float()
+        lengths = lengths.cpu().float()
 
-        mel_output = outputs["mel_final"]  # Mel spectrogram sau postnet
+        outputs = model(fasttext_embeddings, lengths, target_mel=mel)
 
-        # Tính loss giữa Mel-spectrogram dự đoán và thực tế
-        loss = criterion(mel_output, mel)
+        if outputs.size(1) < mel.size(1):
+            outputs = outputs.permute(0, 2, 1)
+            outputs = F.interpolate(outputs, size=(
+                mel.size(1)), mode='linear', align_corners=False)
+            outputs = outputs.permute(0, 2, 1)
+        else:
+            outputs = outputs[:, :mel.size(1), :]
+
+        loss = criterion(outputs, mel)
         total_loss += loss.item()
 
-        # Backpropagation và cập nhật trọng số
         loss.backward()
         optimizer.step()
 
-    return total_loss / len(train_loader)
-print("Start downloading dataset")
-# Tải dữ liệu từ Hugging Face
-dataset_name = "trinhtuyen201/my-audio-dataset"  # Tên bộ dữ liệu của bạn
-dataset = load_dataset(dataset_name, split="train")
-print("Finishing downloading dataset")
-target_length = 73068  # Hoặc chiều dài token của fasttext_embeddings mà bạn mong muốn
+        # Log every 10th step (real-time log output)
+        if batch_idx % 10 == 0:
+            logging.info(
+                f"Epoch [{epoch+1}], Step [{batch_idx+1}/{len(train_loader)}], Loss: {loss.item():.4f}")
 
-# Tạo dataset và dataloader
+    avg_loss = total_loss / len(train_loader)
+    logging.info(f"Epoch [{epoch+1}], Average Loss: {avg_loss:.4f}")
+    return avg_loss
+
+
+# Start training
+logging.info("Start downloading dataset")
+dataset_name = "trinhtuyen201/my-audio-dataset"
+dataset = load_dataset(dataset_name, split="train")
+logging.info("Finishing downloading dataset")
+target_length = 73068
+
 train_dataset = TTS_Dataset(dataset)
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=custom_collate_fn)
-# Huấn luyện qua nhiều epochs
+train_loader = DataLoader(train_dataset, batch_size=16,
+                          shuffle=True, collate_fn=custom_collate_fn)
+
 num_epochs = 3
-print("Start training")
+logging.info("Start training")
+
 for epoch in range(num_epochs):
-    train_loss = train_one_epoch(model, train_loader, criterion, optimizer)
-    print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {train_loss:.4f}")
+    train_loss = train_one_epoch(
+        model, train_loader, criterion, optimizer, epoch)
+    logging.info(f"Epoch [{epoch+1}/{num_epochs}], Loss: {train_loss:.4f}")
+
 save_model(model)
