@@ -56,7 +56,10 @@ def custom_collate_fn(batch, target_length=None):
             mel_padded = F.interpolate(mel_padded, size=(target_length, mel_padded.size(2)), mode='linear', align_corners=False)    
     # Kiểm tra lại chiều dài của mel_padded và fasttext_padded đã đồng bộ chưa
     return fasttext_padded, mel_padded, lengths
-
+def save_model(model, path="hybrid_tts_model.pth"):
+    """Lưu mô hình sau khi huấn luyện hoàn tất"""
+    torch.save(model.state_dict(), path)
+    print(f"Model saved to {path}")
 def train_one_epoch(model, train_loader, criterion, optimizer):
     model.train()
     total_loss = 0.0
@@ -98,3 +101,4 @@ print("Start training")
 for epoch in range(num_epochs):
     train_loss = train_one_epoch(model, train_loader, criterion, optimizer)
     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {train_loss:.4f}")
+save_model(model)
