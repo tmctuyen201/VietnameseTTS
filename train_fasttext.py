@@ -11,8 +11,7 @@ def preprocess_text(text):
     """Tiền xử lý văn bản tiếng Việt"""
     text = TTSnorm(text, punc = False, unknown = True, lower = True, rule = False )  # Chuẩn hóa tiếng Việt bằng Vinorm
     text = text.lower()  # Chuyển thành chữ thường
-    text = re.sub(r'\d+', '', text)  # Loại bỏ số
-    text = re.sub(r'[^\w\s]', '', text)  # Loại bỏ ký tự đặc biệt
+    text = re.sub(r'[\d]+|[^\w\s]', '', text)
     text = underthesea.word_tokenize(text, format="text")  # Tách từ
     return text
 

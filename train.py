@@ -82,17 +82,19 @@ def train_one_epoch(model, train_loader, criterion, optimizer):
         optimizer.step()
 
     return total_loss / len(train_loader)
-
+print("Start downloading dataset")
 # Tải dữ liệu từ Hugging Face
 dataset_name = "trinhtuyen201/my-audio-dataset"  # Tên bộ dữ liệu của bạn
 dataset = load_dataset(dataset_name, split="train")
+print("Finishing downloading dataset")
 target_length = 73068  # Hoặc chiều dài token của fasttext_embeddings mà bạn mong muốn
 
 # Tạo dataset và dataloader
 train_dataset = TTS_Dataset(dataset)
 train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=custom_collate_fn)
 # Huấn luyện qua nhiều epochs
-num_epochs = 10
+num_epochs = 3
+print("Start training")
 for epoch in range(num_epochs):
     train_loss = train_one_epoch(model, train_loader, criterion, optimizer)
     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {train_loss:.4f}")
