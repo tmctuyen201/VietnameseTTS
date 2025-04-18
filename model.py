@@ -43,10 +43,10 @@ class HybridTTS(nn.Module):
         # Ở đây để đơn giản, ta không thay đổi.
 
         # 5. Decoder (Tacotron2-style): sinh ra mel-spectrogram
-        mel_output = self.decoder(
+        mel_output, stop_logits, alignments = self.decoder(
             enc_upsampled, target_mel, pitch=pitch, energy=energy)
 
         # 6. Postnet: tinh chỉnh mel-spectrogram
         mel_residual = self.postnet(mel_output)
         mel_final = mel_output + mel_residual
-        return mel_final
+        return mel_output, mel_final, stop_logits, alignments
