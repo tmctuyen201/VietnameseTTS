@@ -1,19 +1,6 @@
 import argparse
-import re
 import fasttext
-import underthesea
-from vinorm import TTSnorm
-from pyvi import ViTokenizer
-
-
-def preprocess_text(text):
-    """Tiền xử lý văn bản tiếng Việt"""
-    text = TTSnorm(text, punc=False, unknown=True, lower=True,
-                   rule=False)  # Chuẩn hóa tiếng Việt bằng Vinorm
-    text = text.lower()  # Chuyển thành chữ thường
-    text = re.sub(r'[\d]+|[^\w\s]', '', text)
-    text = ViTokenizer.tokenize(text)  # Tách từ
-    return text
+from utils import preprocess_text
 
 
 def train_fasttext(input_files, output_file_path, num_epochs, model_type):

@@ -1,8 +1,11 @@
+import torch
 from torch.utils.data import Dataset
-import librosa
-import librosa.display
 import numpy as np
 from utils import get_fasttext_embedding
+import torchaudio.transforms as T
+
+mel_transform = T.MelSpectrogram(
+    sample_rate=22050, n_mels=80, hop_length=256, n_fft=1024)
 
 
 class TTS_Dataset(Dataset):
@@ -30,17 +33,18 @@ class TTS_Dataset(Dataset):
         return text
     # Hàm chuyển đổi từ audio sang Mel-spectrogram
 
-    def audio_to_mel_spectrogram(self, audio, sr=16000, n_mels=80, hop_length=512, n_fft=2048, fmin=0, fmax=8000):
-        # Tính Mel-spectrogram từ tín hiệu âm thanh
-        mel_spectrogram = librosa.feature.melspectrogram(
-            y=audio, sr=sr, n_mels=n_mels, hop_length=hop_length, n_fft=n_fft, fmin=fmin, fmax=fmax)
-        mel_spectrogram = librosa.power_to_db(
-            mel_spectrogram, ref=np.max)  # Chuyển đổi sang decibel
-        return mel_spectrogram
+    def extract_mel(self, waveform):
+        mel_spectrogram = mel_transform(waveform)
+        return mel_spectrogram.float()
 
     # Ví dụ xử lý một mẫu audio
     def process_audio(self, example):
         # Đảm bảo lấy đường dẫn đúng từ dataset
-        audio = example["audio"]["array"]
-        mel = self.audio_to_mel_spectrogram(audio)
+        waveform = example["audio"]["array"]
+        if isinstance(waveform, np.ndarray):
+            waveform = torch.tensor(waveform).float()
+        if waveform.ndimension() == 1:
+            waveform = waveform.unsqueeze(0)
+        mel = self.extract_mel(waveform)
+        mel = mel.squeeze(0)
         return mel

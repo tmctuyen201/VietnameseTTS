@@ -9,6 +9,8 @@ from config.config import Config
 from dataset import TTS_Dataset
 from model import HybridTTS
 from datasets import load_dataset
+from torch.optim.lr_scheduler import StepLR
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
@@ -25,10 +27,11 @@ logging.basicConfig(
 
 # Khởi tạo mô hình và các thành phần
 config = Config()
-model = HybridTTS(config).cuda()
+model = HybridTTS(config).to(device)
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=1e-4,
                        betas=(0.9, 0.98), eps=1e-9)
+scheduler = StepLR(optimizer, step_size=5, gamma=0.5)
 
 
 def guided_attention_loss(attn_weights, input_lengths, output_lengths, g=0.2):
@@ -93,13 +96,6 @@ def train_one_epoch(model, train_loader, criterion, optimizer, epoch):
         # Giả sử mỗi mel sequence có cùng độ dài (do collate pad), dùng làm output_lengths
         mel_before, mel_after, stop_logits, alignments = model(
             fasttext_embeddings, lengths, target_mel=mel)
-        if mel_before.size(1) < mel.size(1):
-            mel_before = mel_before.permute(0, 2, 1)
-            mel_before = F.interpolate(mel_before, size=(
-                mel.size(1)), mode='linear', align_corners=False)
-            mel_before = mel_before.permute(0, 2, 1)
-        else:
-            mel_before = mel_before[:, :mel.size(1), :]
 
         if mel_after.size(1) < mel.size(1):
             mel_after = mel_after.permute(0, 2, 1)
@@ -113,7 +109,6 @@ def train_one_epoch(model, train_loader, criterion, optimizer, epoch):
         output_lengths = torch.tensor(
             [alignments.shape[1]] * alignments.size(0)).to(device)
         # Mel losses
-        loss_mel_before = criterion(mel_before, mel)
         loss_mel_after = criterion(mel_after, mel)
 
         # Stop token loss (dự đoán 1 tại frame cuối)
@@ -126,17 +121,16 @@ def train_one_epoch(model, train_loader, criterion, optimizer, epoch):
         loss_attn = guided_attention_loss(
             alignments, input_lengths=lengths, output_lengths=output_lengths
         )
-        loss = loss_mel_before + loss_mel_after + 0.5 * loss_stop + 1.0 * loss_attn
+        loss = loss_mel_after + 0.5 * loss_stop + 1.0 * loss_attn
         total_loss += loss.item()
 
         loss.backward()
-        optimizer.step()
+        scheduler.step()
 
         # Log every 10th step (real-time log output)
         if batch_idx % 10 == 0:
             logging.info(
                 f"Epoch [{epoch+1}], Step [{batch_idx+1}/{len(train_loader)}], "
-                f"Loss: {loss.item():.4f}, mel_before: {loss_mel_before.item():.4f}, "
                 f"mel_after: {loss_mel_after.item():.4f}, stop: {loss_stop.item():.4f}, "
                 f"attn: {loss_attn.item():.4f}"
             )
@@ -157,7 +151,7 @@ train_dataset = TTS_Dataset(dataset)
 train_loader = DataLoader(train_dataset, batch_size=16,
                           shuffle=True, collate_fn=custom_collate_fn)
 
-num_epochs = 5
+num_epochs = 3
 logging.info("Start training")
 
 for epoch in range(num_epochs):

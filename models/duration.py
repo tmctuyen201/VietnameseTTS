@@ -1,10 +1,11 @@
 import torch.nn as nn
 import torch
 
+
 class DurationBasedUpsample(nn.Module):
     def __init__(self):
         super(DurationBasedUpsample, self).__init__()
-    
+
     def forward(self, enc_out, durations):
         # Giả sử durations có dạng số thực (số frame cho mỗi token).
         # Chúng ta làm trơn: rounding duration và lặp lại vector theo duration (hoặc dùng cách chia trọng số mềm)

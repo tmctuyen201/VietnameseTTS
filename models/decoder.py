@@ -32,7 +32,6 @@ class Tacotron2Decoder(nn.Module):
     def forward(self, encoder_memory, target_mel=None, pitch=None, energy=None):
         pitch = pitch.to(device).float()
         energy = energy.to(device).float()
-        target_mel = target_mel.to(device).float()
 
         if pitch is not None and energy is not None:
             pitch_energy = torch.cat([pitch, energy], dim=-1)
@@ -42,6 +41,7 @@ class Tacotron2Decoder(nn.Module):
         B, T, _ = encoder_memory.size()
 
         if target_mel is not None:
+            target_mel = target_mel.to(device).float()
             outputs = []
             stop_outputs = []
             alignments = []
@@ -72,6 +72,36 @@ class Tacotron2Decoder(nn.Module):
             stop_logits = torch.cat(stop_outputs, dim=1)       # (B, T, 1)
             alignments = torch.cat(alignments, dim=1)          # (B, T, T_enc)
         else:
-            raise NotImplementedError("Inference mode chưa được cài.")
+            # Inference (sử dụng sampling hoặc teacher forcing trong một số bước)
+            outputs = []
+            stop_outputs = []
+            alignments = []
+            prev_mel = torch.zeros(B, self.mel_dim).to(device).float()
+
+            for t in range(T):
+                prenet_out = self.prenet(prev_mel).unsqueeze(1)
+
+                # Attention: query = prenet_out, keys & values = encoder_memory
+                attn_output, attn_weights = self.attention(
+                    prenet_out, encoder_memory, encoder_memory, need_weights=True)
+
+                decoder_input = torch.cat([prenet_out, attn_output], dim=-1)
+                out, _ = self.decoder_rnn(decoder_input)
+
+                mel_frame = self.mel_proj(out.squeeze(1))
+                stop_logit = self.stop_proj(out.squeeze(1))  # (B, 1)
+
+                outputs.append(mel_frame.unsqueeze(1))
+                stop_outputs.append(stop_logit.unsqueeze(1))  # (B, 1, 1)
+                alignments.append(attn_weights)  # (B, 1, T_enc)
+
+                # Inference (sử dụng previous mel frame cho bước tiếp theo)
+                # Dùng mel_frame làm đầu vào cho bước tiếp theo
+                prev_mel = mel_frame.squeeze(1)
+
+            # (B, T, mel_dim)
+            mel_output = torch.cat(outputs, dim=1)
+            stop_logits = torch.cat(stop_outputs, dim=1)       # (B, T, 1)
+            alignments = torch.cat(alignments, dim=1)
 
         return mel_output, stop_logits, alignments
